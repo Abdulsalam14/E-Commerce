@@ -52,6 +52,10 @@ namespace App.Business.Concrete
         {
             _productDal.Update(product);
         }
-
+        public List<Product> Search(string Productname, decimal? Unitprice)
+        {
+            return Unitprice==null?_productDal.Search(p=>p.ProductName==Productname):
+                _productDal.Search(p=>p.ProductName==Productname && p.UnitPrice==Unitprice);
+        }
     }
 }

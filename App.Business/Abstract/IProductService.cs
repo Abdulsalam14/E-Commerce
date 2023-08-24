@@ -15,6 +15,7 @@ namespace App.Business.Abstract
         void Update(Product product);
         void Delete(Product product);
         Product GetById(int productid);
+        List<Product> Search(string ProductName, decimal? Unitprice);
 
     }
 }

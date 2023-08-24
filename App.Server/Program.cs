@@ -25,13 +25,16 @@ namespace App.Server
             SetupServer();
             Console.ReadLine();
             CloseAllSockets();
-
-            GetAllServicesAsText();
         }
 
         private static void CloseAllSockets()
         {
-            throw new NotImplementedException();
+            foreach (var client in clientSockets)
+            {
+                client.Shutdown(SocketShutdown.Both);
+                client.Close();
+            }
+            serverSocket.Close();
         }
 
         private static void SetupServer()
@@ -63,7 +66,7 @@ namespace App.Server
 
         private static void ReceiveCallBack(IAsyncResult ar)
         {
-            Socket current=(Socket)ar.AsyncState;
+            Socket current = (Socket)ar.AsyncState;
             int received;
             try
             {
@@ -79,20 +82,55 @@ namespace App.Server
             byte[] recBuf = new byte[received];
             Array.Copy(buffer, recBuf, received);
             string msg = Encoding.ASCII.GetString(recBuf);
-            Console.WriteLine("Received Text");
-            if (msg.ToLower()=="exit")
+            Console.WriteLine("Received Text" + msg);
+            if (msg.ToLower() == "exit")
             {
                 current.Shutdown(SocketShutdown.Both);
                 current.Close();
                 clientSockets.Remove(current);
                 Console.WriteLine("Client disconnected");
             }
-            else if(msg != String.Empty)
+            else if (msg != String.Empty)
             {
                 try
                 {
-                    var result = msg.Split(new[] { ' ' }, 2) ;
-                    if (result.Length == 2)
+                    var result = msg.Split(new[] { ' ' }, 2);
+                    if (msg.Contains('?'))
+                    {
+                        var subresult = msg.Split(new[] { '?' }, 2);
+                        var names = subresult[0].Split('\\');
+                        var keyvalues = subresult[1].Split(new[] { '&' }, 2);
+
+                        var ClassName = names[0];
+                        var MethodName = names[1];
+
+                        var MyType = Assembly.GetAssembly(typeof(ProductService)).GetTypes()
+                           .FirstOrDefault(t => t.Name.Contains(ClassName));
+                        if (MyType != null)
+                        {
+
+                            var methods = MyType.GetMethods();
+                            MethodInfo MyMethod = methods.FirstOrDefault(m => m.Name.Contains(MethodName));
+
+                            object MyInstance = Activator.CreateInstance(MyType);
+                            object objResponse = null;
+                            var JsonString = string.Empty;
+                            string Productname = keyvalues[0].Split('=')[1];
+                            if (keyvalues.Length ==2)
+                            {
+                                decimal? UnitPrice = decimal.Parse(keyvalues[1].Split('=')[1]);
+                                objResponse = MyMethod.Invoke(MyInstance, new object[] { Productname, UnitPrice });
+                            }
+                            else if(keyvalues.Length ==1)
+                            {
+                                objResponse = MyMethod.Invoke(MyInstance, new object[] { Productname, null });
+                            }
+                            JsonString = JsonConvert.SerializeObject(objResponse);
+                            byte[] data = Encoding.ASCII.GetBytes(JsonString);
+                            current.Send(data);
+                        }
+                    }
+                    else if (result.Length == 2)
                     {
                         var jsonPart = result[1];
                         var subResult = result[0].Split('\\');
@@ -106,9 +144,9 @@ namespace App.Server
 
                         var methods = MyType.GetMethods();
                         MethodInfo MyMethod = methods.FirstOrDefault(m => m.Name.Contains(Methodname));
-                        var myInstance = Activator.CreateInstance(MyType);
+                        object myInstance = Activator.CreateInstance(MyType);
                         MyMethod.Invoke(myInstance, new object[] { obj });
-                        byte[] data =Encoding.ASCII.GetBytes("POST Operation Succes");
+                        byte[] data = Encoding.ASCII.GetBytes("POST Operation Succes");
                         current.Send(data);
                     }
                     else
@@ -119,7 +157,7 @@ namespace App.Server
 
                         var MyType = Assembly.GetAssembly(typeof(ProductService)).GetTypes()
                             .FirstOrDefault(t => t.Name.Contains(ClassName));
-                        if(MyType != null)
+                        if (MyType != null)
                         {
                             var methods = MyType.GetMethods();
                             MethodInfo MyMethod = methods.FirstOrDefault(m => m.Name.Contains(MethodName));
@@ -128,18 +166,18 @@ namespace App.Server
 
                             var paramid = -1;
                             var jsonString = string.Empty;
-                            object objResponse=null;
+                            object objResponse = null;
                             if (result.Length == 3)
                             {
                                 paramid = int.Parse(result[2]);
-                                objResponse = MyMethod.Invoke(MyInstance,new object[] { paramid });
+                                objResponse = MyMethod.Invoke(MyInstance, new object[] { paramid });
                             }
                             else
                             {
-                                objResponse = MyMethod.Invoke(MyInstance,null);
+                                objResponse = MyMethod.Invoke(MyInstance, null);
                             }
-                            jsonString=JsonConvert.SerializeObject(objResponse);
-                            byte[]data=Encoding.ASCII.GetBytes(jsonString);
+                            jsonString = JsonConvert.SerializeObject(objResponse);
+                            byte[] data = Encoding.ASCII.GetBytes(jsonString);
                             current.Send(data);
                         }
                     }
@@ -175,15 +213,27 @@ namespace App.Server
                 {
                     string responseText = $@"{className}\{m.Name}";
                     var parameters = m.GetParameters();
-                    foreach (var param in parameters)
+                    if (m.Name == "Search")
                     {
-                        if (param.ParameterType != typeof(string) && param.ParameterType.IsClass)
+                        responseText += "?";
+                        for (int i = 0; i < parameters.Length; i++)
                         {
-                            responseText += $@"\{param.Name}[json]";
+                            if (i > 0) responseText += "&";
+                            responseText += $@"{parameters[i].Name}=value";
                         }
-                        else
+                    }
+                    else
+                    {
+                        foreach (var param in parameters)
                         {
-                            responseText += $@"\{param.Name}";
+                            if (param.ParameterType != typeof(string) && param.ParameterType.IsClass)
+                            {
+                                responseText += $@"\{param.Name}[json]";
+                            }
+                            else
+                            {
+                                responseText += $@"\{param.Name}";
+                            }
                         }
                     }
                     sb.AppendLine(responseText);
